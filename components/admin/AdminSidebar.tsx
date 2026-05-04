@@ -1,122 +1,151 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Package,
-  Truck,
-  Users,
-  Mail,
-  Settings,
-  Menu,
-  X,
-  ShieldCheck
-} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import "leaflet/dist/leaflet.css";
 
-const navItems = [
-  { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard, exact: true },
-  { name: "Shipments", href: "/dashboard/admin/orders", icon: Package },
-  { name: "Fleet Management", href: "/dashboard/admin/riders", icon: Truck },
-  { name: "Support Center", href: "/dashboard/admin/chats", icon: Users },
-  { name: "Communications", href: "/dashboard/admin/send-mail", icon: Mail },
-  { name: "System Settings", href: "/dashboard/admin/settings", icon: Settings },
-];
+/* ================= TYPES ================= */
 
-export default function AdminSidebar() {
-  const pathname = usePathname();
-  const [open, setOpen] = useState(false);
+type Location = {
+  lat: number;
+  lng: number;
+  address?: string;
+};
+
+type Props = {
+  location?: Location | null;
+};
+
+/* ================= DYNAMIC IMPORTS (SSR SAFE) ================= */
+
+const MapContainer = dynamic(
+  () => import("react-leaflet").then((m) => m.MapContainer),
+  { ssr: false, loading: () => <MapPlaceholder message="Initializing Engine..." /> }
+);
+
+const TileLayer = dynamic(
+  () => import("react-leaflet").then((m) => m.TileLayer),
+  { ssr: false }
+);
+
+const Marker = dynamic(
+  () => import("react-leaflet").then((m) => m.Marker),
+  { ssr: false }
+);
+
+const Popup = dynamic(
+  () => import("react-leaflet").then((m) => m.Popup),
+  { ssr: false }
+);
+
+/* ================= HELPER COMPONENT ================= */
+
+function MapPlaceholder({ message }: { message: string }) {
+  return (
+    <div className="mt-6 h-80 rounded-sm bg-gray-50 flex flex-col items-center justify-center border border-gray-200">
+      <div className="w-6 h-6 border-2 border-[#4D148C] border-t-[#FF6200] rounded-full animate-spin mb-3"></div>
+      <p className="text-[9px] font-black uppercase text-gray-400 tracking-[0.2em]">
+        {message}
+      </p>
+    </div>
+  );
+}
+
+/* ================= MAIN COMPONENT ================= */
+
+export default function TrackingMap({ location }: Props) {
+  const markerRef = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+
+  /* ---------- SAFETY CHECK ---------- */
+  if (!location || location.lat == null || location.lng == null) {
+    return <MapPlaceholder message="Awaiting GPS Coordinates" />;
+  }
+
+  const center: [number, number] = [location.lat, location.lng];
+
+  /* ---------- LOAD LEAFLET (CLIENT ONLY) ---------- */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    (async () => {
+      // ✅ Properly typed dynamic import (fixes Vercel build)
+      const Leaflet = (await import("leaflet")) as typeof import("leaflet");
+
+      // Fix marker icons in production
+      delete (Leaflet as any).Icon.Default.prototype._getIconUrl;
+
+      Leaflet.Icon.Default.mergeOptions({
+        iconRetinaUrl:
+          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+        iconUrl:
+          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        shadowUrl:
+          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+      });
+
+      setReady(true);
+    })();
+  }, []);
+
+  /* ---------- SMOOTH MARKER UPDATE ---------- */
+  useEffect(() => {
+    if (!markerRef.current || !ready) return;
+    markerRef.current.setLatLng(center);
+  }, [location.lat, location.lng, ready]);
+
+  if (!ready) {
+    return <MapPlaceholder message="Loading Cartography" />;
+  }
 
   return (
-    <>
-      {/* Mobile Top Bar (Remains at top) */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#4D148C] text-white shadow-lg sticky top-0 z-50">
-        <button onClick={() => setOpen(true)} className="p-1 hover:bg-white/10 rounded">
-          <Menu className="w-6 h-6" />
-        </button>
-        <div className="flex items-center gap-1 font-black text-lg tracking-tighter">
-          <span className="text-white">Fed</span>
-          <span className="text-[#FF6200]">Ex</span>
-        </div>
+    <div className="mt-6 h-80 rounded-sm overflow-hidden shadow-lg border-t-4 border-[#4D148C] relative group">
+      {/* Overlay */}
+      <div className="absolute top-3 left-3 z-1000 bg-white/95 px-3 py-1.5 border border-gray-200 shadow-sm">
+        <p className="text-[8px] font-black text-[#4D148C] uppercase tracking-widest leading-none">
+          Status
+        </p>
+        <p className="text-[10px] font-bold text-gray-800 uppercase italic">
+          Active Satellite Link
+        </p>
       </div>
 
-      {/* Overlay for Mobile */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm"
-          onClick={() => setOpen(false)}
-        />
-      )}
-
-      {/* Sidebar - NOW STICKY */}
-      <aside
-        className={`
-          fixed md:sticky top-0 z-50 inset-y-0 left-0 w-72 h-screen
-          bg-white border-r border-slate-200 text-slate-700 flex flex-col
-          transform transition-transform duration-300 ease-in-out
-          ${open ? "translate-x-0" : "-translate-x-full"}
-          md:translate-x-0
-        `}
+      <MapContainer
+        center={center}
+        zoom={13}
+        scrollWheelZoom={false}
+        className="h-full w-full"
+        zoomControl={false}
       >
-        {/* Header */}
-        <div className="px-8 py-8 border-b border-slate-100 flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-0 text-3xl font-black tracking-tighter">
-            <span className="text-[#4D148C]">Fed</span>
-            <span className="text-[#FF6200]">Ex</span>
-            <span className="ml-2 text-[10px] uppercase tracking-widest text-slate-400 font-bold self-end mb-1">
-              Admin
-            </span>
-          </div>
-          <button className="md:hidden p-1 hover:bg-slate-100 rounded" onClick={() => setOpen(false)}>
-            <X className="w-6 h-6 text-slate-500" />
-          </button>
-        </div>
+        <TileLayer
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          attribution="&copy; FedEx Logistics"
+        />
 
-        {/* Navigation - Scrollable if items exceed height */}
-        <nav className="flex-1 px-4 py-8 space-y-2 overflow-y-auto custom-scrollbar">
-          {navItems.map(({ name, href, icon: Icon, exact }) => {
-            const active = exact
-              ? pathname === href
-              : pathname.startsWith(href);
-
-            return (
-              <Link
-                key={name}
-                href={href}
-                onClick={() => setOpen(false)}
-                className={`
-                  flex items-center gap-4 px-4 py-3.5 rounded-lg transition-all duration-200 group
-                  ${
-                    active
-                      ? "bg-[#4D148C] text-white font-bold shadow-md shadow-purple-200"
-                      : "hover:bg-slate-50 hover:text-[#4D148C] text-slate-500 font-medium"
-                  }
-                `}
-              >
-                <Icon className={`w-5 h-5 transition-colors ${active ? "text-[#FF6200]" : "group-hover:text-[#FF6200]"}`} />
-                <span className="tracking-tight">{name}</span>
-                {active && (
-                   <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#FF6200]" />
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Footer */}
-        <div className="px-6 py-6 bg-slate-50 border-t border-slate-200 shrink-0">
-          <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 rounded-full bg-[#4D148C] flex items-center justify-center text-white">
-              <ShieldCheck className="w-5 h-5" />
+        <Marker position={center} ref={markerRef}>
+          <Popup>
+            <div className="text-center p-1 font-sans">
+              <p className="text-[9px] font-black uppercase text-[#4D148C] mb-1">
+                Current Manifest Point
+              </p>
+              <p className="text-xs font-bold text-gray-700 m-0 leading-tight">
+                {location.address || "Point of Interest"}
+              </p>
             </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-800 tracking-wider">Secure Session</p>
-              <p className="text-[10px] text-slate-500">Node ID: FDX-7729</p>
-            </div>
-          </div>
-        </div>
-      </aside>
-    </>
+          </Popup>
+        </Marker>
+      </MapContainer>
+
+      {/* Global Leaflet styling */}
+      <style jsx global>{`
+        .leaflet-popup-content-wrapper {
+          border-radius: 0px !important;
+          border-bottom: 3px solid #FF6200;
+        }
+        .leaflet-popup-tip {
+          display: none;
+        }
+      `}</style>
+    </div>
   );
 }
