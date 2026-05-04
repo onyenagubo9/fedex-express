@@ -2,9 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import type { LatLngTuple } from "leaflet";
+// Import Leaflet CSS - Required for Vercel production builds
+import "leaflet/dist/leaflet.css";
 
 /* ================= TYPES ================= */
+
+// We use a local interface to define Leaflet-specific types 
+// This prevents the "Module not found" error if @types/leaflet is missing during build
+interface LeafletNamespace {
+  lat: number;
+  lng: number;
+}
 
 type Location = {
   lat: number;
@@ -20,7 +28,7 @@ type Props = {
 
 const MapContainer = dynamic(
   () => import("react-leaflet").then((m) => m.MapContainer),
-  { ssr: false }
+  { ssr: false, loading: () => <MapPlaceholder message="Initializing Engine..." /> }
 );
 
 const TileLayer = dynamic(
@@ -38,81 +46,107 @@ const Popup = dynamic(
   { ssr: false }
 );
 
-/* ================= COMPONENT ================= */
+/* ================= HELPER COMPONENTS ================= */
+
+function MapPlaceholder({ message }: { message: string }) {
+  return (
+    <div className="mt-6 h-80 rounded-sm bg-gray-50 flex flex-col items-center justify-center border border-gray-200">
+      <div className="w-6 h-6 border-2 border-[#4D148C] border-t-[#FF6200] rounded-full animate-spin mb-3"></div>
+      <p className="text-[9px] font-black uppercase text-gray-400 tracking-[0.2em]">{message}</p>
+    </div>
+  );
+}
+
+/* ================= MAIN COMPONENT ================= */
 
 export default function TrackingMap({ location }: Props) {
   const markerRef = useRef<any>(null);
   const [ready, setReady] = useState(false);
+  const [L, setL] = useState<any>(null);
 
   /* ---------- SAFETY CHECK ---------- */
   if (!location || location.lat == null || location.lng == null) {
-    return (
-      <div className="mt-6 p-6 rounded-xl bg-gray-100 text-gray-500 text-sm">
-        Location not available yet
-      </div>
-    );
+    return <MapPlaceholder message="Awaiting GPS Coordinates" />;
   }
 
-  const center: LatLngTuple = [location.lat, location.lng];
+  // Using a plain array to avoid the LatLngTuple type error during Vercel build
+  const center: [number, number] = [location.lat, location.lng];
 
   /* ---------- LOAD LEAFLET (CLIENT ONLY) ---------- */
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     (async () => {
-      const L = await import("leaflet");
+      // Import the full Leaflet library only on the client
+      const Leaflet = await import("leaflet");
+      
+      // Fix default marker icons for production builds
+      // @ts-ignore
+      delete Leaflet.Icon.Default.prototype._getIconUrl;
 
-      // Fix default marker icons
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+      Leaflet.Icon.Default.mergeOptions({
+        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
       });
 
+      setL(Leaflet);
       setReady(true);
     })();
   }, []);
 
   /* ---------- SMOOTH MARKER UPDATE ---------- */
   useEffect(() => {
-    if (!markerRef.current) return;
-
+    if (!markerRef.current || !ready) return;
     markerRef.current.setLatLng(center);
-  }, [location.lat, location.lng]);
+  }, [location.lat, location.lng, ready]);
 
   if (!ready) {
-    return (
-      <div className="mt-6 h-100 rounded-xl bg-gray-100 flex items-center justify-center text-gray-500">
-        Loading map…
-      </div>
-    );
+    return <MapPlaceholder message="Loading Cartography" />;
   }
 
-  /* ================= RENDER ================= */
-
   return (
-    <div className="mt-6 h-100 rounded-xl overflow-hidden shadow border">
+    <div className="mt-6 h-80 rounded-sm overflow-hidden shadow-lg border-t-4 border-[#4D148C] relative group">
+      {/* FedEx Style Overlay */}
+      <div className="absolute top-3 left-3 z-1000 bg-white/95 px-3 py-1.5 border border-gray-200 shadow-sm">
+        <p className="text-[8px] font-black text-[#4D148C] uppercase tracking-widest leading-none">Status</p>
+        <p className="text-[10px] font-bold text-gray-800 uppercase italic">Active Satellite Link</p>
+      </div>
+
       <MapContainer
         center={center}
         zoom={13}
         scrollWheelZoom={false}
         className="h-full w-full"
+        zoomControl={false} // Cleaner professional look
       >
         <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          // Professional "Light" theme for logistics dashboards
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; FedEx Logistics'
         />
 
         <Marker position={center} ref={markerRef}>
           <Popup>
-            📍 {location.address || "Current location"}
+            <div className="text-center p-1 font-sans">
+              <p className="text-[9px] font-black uppercase text-[#4D148C] mb-1">Current Manifest Point</p>
+              <p className="text-xs font-bold text-gray-700 m-0 leading-tight">
+                {location.address || "Point of Interest"}
+              </p>
+            </div>
           </Popup>
         </Marker>
       </MapContainer>
+
+      <style jsx global>{`
+        .leaflet-popup-content-wrapper {
+          border-radius: 0px !important;
+          border-bottom: 3px solid #FF6200;
+        }
+        .leaflet-popup-tip {
+          display: none;
+        }
+      `}</style>
     </div>
   );
 }
